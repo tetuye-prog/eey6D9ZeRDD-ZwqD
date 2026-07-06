@@ -1892,7 +1892,8 @@ const MONTH_BANNER_IMAGES = {"a": ["data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAA
         if (isOverlapYes) {
           mainInner = `<div class="cry-icon">😭</div>`;
         } else if (stillPredicted) {
-          mainInner = `${nudgeHtml}<div class="mark-yes predicted"></div><div class="predicted-label">予測</div>`;
+          const previewIcon = activeCal === 'b' ? '🍷' : (activeCal === 'c' ? '😴' : '😔');
+          mainInner = `${nudgeHtml}<div class="mark-yes predicted">${previewIcon}</div><div class="predicted-label">予測</div>`;
         } else {
           const yesJustConfirmed = String(day) === justConfirmedYesDay;
           if (yesJustConfirmed) justConfirmedYesDay = null; // consume the flag so it only plays once
@@ -2769,6 +2770,12 @@ const MONTH_BANNER_IMAGES = {"a": ["data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAA
     if (document.visibilityState === 'visible') syncFromCloud();
   });
   window.addEventListener('focus', () => syncFromCloud());
+
+  // Also poll periodically while the app is open and visible, so changes made
+  // on another device show up here without needing to switch away and back.
+  setInterval(() => {
+    if (document.visibilityState === 'visible') syncFromCloud();
+  }, 30000);
   document.getElementById('restoreBtn').addEventListener('click', () => {
     document.getElementById('restoreFileInput').click();
   });
