@@ -2562,13 +2562,13 @@ const MONTH_BANNER_IMAGES = {"a": ["data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAA
 
   async function syncToCloud() {
     const config = getCloudConfig();
-    if (!config) return;
+    if (!config) return { ok: false, reason: 'not-configured' };
     try {
       const updatedAt = Date.now();
       const encrypted = await encryptForCloud(collectAllSyncableData());
       if (!encrypted) {
         console.error('cloud sync (upload) skipped: encryption unavailable (window.crypto.subtle missing)');
-        return;
+        return { ok: false, reason: 'no-crypto' };
       }
       const payload = { updatedAt, enc: encrypted };
       const res = await fetch(`https://api.jsonbin.io/v3/b/${config.binId}`, {
@@ -2582,11 +2582,13 @@ const MONTH_BANNER_IMAGES = {"a": ["data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAA
       if (!res.ok) {
         const body = await res.text().catch(() => '');
         console.error('cloud sync (upload) failed:', res.status, body);
-        return;
+        return { ok: false, reason: `http-${res.status}` };
       }
       localStorage.setItem(CLOUD_LAST_SYNC_KEY, String(updatedAt));
+      return { ok: true };
     } catch (e) {
       console.error('cloud sync (upload) failed', e);
+      return { ok: false, reason: 'exception' };
     }
   }
 
@@ -2599,7 +2601,7 @@ const MONTH_BANNER_IMAGES = {"a": ["data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAA
 
   async function syncFromCloud() {
     const config = getCloudConfig();
-    if (!config) return;
+    if (!config) return { ok: false, reason: 'not-configured' };
     try {
       const res = await fetch(`https://api.jsonbin.io/v3/b/${config.binId}/latest`, {
         headers: { 'X-Master-Key': config.apiKey }
@@ -2607,18 +2609,18 @@ const MONTH_BANNER_IMAGES = {"a": ["data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAA
       if (!res.ok) {
         const body = await res.text().catch(() => '');
         console.error('cloud sync (download) failed:', res.status, body);
-        return;
+        return { ok: false, reason: `http-${res.status}` };
       }
       const json = await res.json();
       const remote = json && json.record;
-      if (!remote) return;
+      if (!remote) return { ok: true, updated: false };
 
       // Support both the new encrypted format and old plaintext bins from
       // before encryption was added.
       const remoteData = remote.enc ? await decryptFromCloud(remote.enc) : remote.data;
       if (!remoteData) {
         console.error('cloud sync (download) failed: could not decrypt remote data');
-        return;
+        return { ok: false, reason: 'no-crypto-or-decrypt-failed' };
       }
 
       const localTimestamp = Number(localStorage.getItem(CLOUD_LAST_SYNC_KEY) || 0);
@@ -2632,9 +2634,12 @@ const MONTH_BANNER_IMAGES = {"a": ["data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAA
         Object.keys(memoCache).forEach(k => delete memoCache[k]);
         loadQuestion();
         loadMonth(current);
+        return { ok: true, updated: true };
       }
+      return { ok: true, updated: false };
     } catch (e) {
       console.error('cloud sync (download) failed', e);
+      return { ok: false, reason: 'exception' };
     }
   }
 
@@ -2726,9 +2731,29 @@ const MONTH_BANNER_IMAGES = {"a": ["data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAA
   document.getElementById('cloudSyncBtn').addEventListener('click', setupCloudSync);
   document.getElementById('forceSyncBtn').addEventListener('click', async () => {
     const btn = document.getElementById('forceSyncBtn');
+    if (!getCloudConfig()) {
+      alert('先に「☁️ Cloud Sync setup」でBin IDとAPI Keyを設定してください。');
+      return;
+    }
     btn.textContent = '🔄 Syncing…';
-    await syncFromCloud();
-    btn.textContent = '🔄 Sync Now';
+    // Pull first so any newer remote changes are merged in before we push,
+    // otherwise stale local data could overwrite another device's newer data.
+    const downResult = await syncFromCloud();
+    const upResult = await syncToCloud();
+    if (upResult.ok && downResult.ok) {
+      btn.textContent = '✅ Synced';
+    } else {
+      const reason = !upResult.ok ? upResult.reason : downResult.reason;
+      const messages = {
+        'no-crypto': '暗号化がこの端末/ブラウザで使えません(file://だと発生しやすいです)',
+        'no-crypto-or-decrypt-failed': '暗号化がこの端末/ブラウザで使えないか、復号に失敗しました',
+        'not-configured': 'Cloud Syncが設定されていません'
+      };
+      const detail = messages[reason] || `エラー: ${reason}`;
+      btn.textContent = '⚠️ Sync failed';
+      alert(`同期に失敗しました。\n\n${detail}`);
+    }
+    setTimeout(() => { btn.textContent = '🔄 Sync Now'; }, 2500);
   });
 
   // Pull the latest data whenever the user returns to this tab/app, so
