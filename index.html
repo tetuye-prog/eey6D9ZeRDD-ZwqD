@@ -1507,6 +1507,7 @@
     data[day] = text;
     try {
       localStorage.setItem(memoMonthKey(year, month), JSON.stringify(data));
+      scheduleCloudSync();
     } catch (e) {
       console.error('save memo failed', e);
     }
